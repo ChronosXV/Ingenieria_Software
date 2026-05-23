@@ -515,6 +515,22 @@
       </footer>
     </div>
 
+    <!-- Lightbox Modal for Premium EDA Plots Zoom -->
+    <div id="edaLightbox" class="eda-lightbox" role="dialog" aria-modal="true" aria-hidden="true">
+      <button class="eda-lightbox__close" aria-label="Cerrar vista ampliada"><i class="bi bi-x"></i></button>
+      <div class="eda-lightbox__content">
+        <div class="eda-lightbox__header">
+          <h3 id="edaLightboxTitle" class="eda-lightbox__title">Título del Gráfico</h3>
+        </div>
+        <div class="eda-lightbox__body">
+          <img id="edaLightboxImg" src="" alt="Gráfico ampliado" class="eda-lightbox__img" />
+        </div>
+        <div class="eda-lightbox__footer">
+          <p id="edaLightboxDesc" class="eda-lightbox__desc">Descripción o explicación del gráfico.</p>
+        </div>
+      </div>
+    </div>
+
     <!-- External Leaflet and Turf scripts -->
     <script
       src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
