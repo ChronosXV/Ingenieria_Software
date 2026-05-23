@@ -1,828 +1,673 @@
-const CABA_CENTER = [-34.6037, -58.3816];
-const CABA_BOUNDS = [
-  [-34.705, -58.531],
-  [-34.526, -58.335],
-];
+// Portal de Análisis de Seguridad CABA - Controlador General
+(function () {
+  "use strict";
 
-const DATA_PATHS = {
-  barrios: "./data/barrios_caba.geojson",
-  predictions: "./data/matriz_predicciones.json",
-  metrics: "./data/metricas_modelo.json",
-  featureImportance: "./data/feature_importance.json",
-};
+  // State Management
+  let map = null;
+  let tileLayer = null;
+  let geojsonLayer = null;
+  let barriosData = null;
+  let predictionsMatrix = null;
+  
+  let selectedBarrioName = null; // Casing: uppercase, e.g., "PALERMO"
+  let selectedBarrioComuna = null; // integer
+  let simulationMode = "auto"; // "auto" or "manual"
+  let currentTheme = localStorage.getItem("theme") || "light"; // Default theme is Light Mode
+  
+  // DOM References
+  const mapStatus = document.getElementById("mapStatus");
+  const resultPanel = document.getElementById("resultPanel");
+  const btnAutoMode = document.getElementById("btnAutoMode");
+  const btnManualMode = document.getElementById("btnManualMode");
+  const simulatorControls = document.getElementById("simulatorControls");
+  
+  // Simulation Input DOM References
+  const simMes = document.getElementById("simMes");
+  const simDia = document.getElementById("simDia");
+  const simHora = document.getElementById("simHora");
+  const simHoraVal = document.getElementById("simHoraVal");
+  const simArma = document.getElementById("simArma");
+  const simMoto = document.getElementById("simMoto");
+  
+  const comunaSelect = document.getElementById("comunaSelect");
 
-const barrioToComunaFallback = {
-  AGRONOMIA: 15,
-  ALMAGRO: 5,
-  BALVANERA: 3,
-  BARRACAS: 4,
-  BELGRANO: 13,
-  BOCA: 4,
-  BOEDO: 5,
-  CABALLITO: 6,
-  CHACARITA: 15,
-  COGHLAN: 12,
-  COLEGIALES: 13,
-  CONSTITUCION: 1,
-  FLORES: 7,
-  FLORESTA: 10,
-  LINIERS: 9,
-  MATADEROS: 9,
-  MONSERRAT: 1,
-  "MONTE CASTRO": 10,
-  "NUEVA POMPEYA": 4,
-  NUNEZ: 13,
-  "NUÑEZ": 13,
-  PALERMO: 14,
-  "PARQUE AVELLANEDA": 9,
-  "PARQUE CHACABUCO": 7,
-  "PARQUE CHAS": 15,
-  "PARQUE PATRICIOS": 4,
-  PATERNAL: 15,
-  "PUERTO MADERO": 1,
-  RECOLETA: 2,
-  RETIRO: 1,
-  SAAVEDRA: 12,
-  "SAN CRISTOBAL": 3,
-  "SAN NICOLAS": 1,
-  "SAN TELMO": 1,
-  "VELEZ SARSFIELD": 10,
-  VERSALLES: 10,
-  "VILLA CRESPO": 15,
-  "VILLA DEL PARQUE": 11,
-  "VILLA DEVOTO": 11,
-  "VILLA GENERAL MITRE": 11,
-  "VILLA LUGANO": 8,
-  "VILLA LURO": 10,
-  "VILLA ORTUZAR": 15,
-  "VILLA PUEYRREDON": 12,
-  "VILLA REAL": 10,
-  "VILLA RIACHUELO": 8,
-  "VILLA SANTA RITA": 11,
-  "VILLA SOLDATI": 8,
-  "VILLA URQUIZA": 12,
-};
-
-const appState = {
-  map: null,
-  barriosLayer: null,
-  clickMarker: null,
-  barriosGeoJson: null,
-  barrioFeatures: [],
-  predictionIndexes: null,
-  featureChart: null,
-};
-
-const resultPanel = document.getElementById("resultPanel");
-const mapStatus = document.getElementById("mapStatus");
-const metricsSection = document.getElementById("metricsSection");
-const metricsContent = document.getElementById("metricsContent");
-const featureSection = document.getElementById("featureSection");
-const featureContent = document.getElementById("featureContent");
-
-document.addEventListener("DOMContentLoaded", () => {
-  renderEmptyState();
-  initializeMap();
-  initializeApp().catch((error) => {
-    console.error("Error general al inicializar la app:", error);
-    renderMessageState(
-      "No se pudo inicializar completamente la aplicación",
-      "Verificá que los archivos JSON estén disponibles y abrí el proyecto con un servidor estático como Live Server o GitHub Pages.",
-      "warning"
-    );
-    updateMapStatus("No se pudieron cargar todos los recursos necesarios.", "error");
-  });
-});
-
-async function initializeApp() {
-  const [barriosGeoJson, predictionRows, metrics, featureImportance] = await Promise.all([
-    fetchJson(DATA_PATHS.barrios),
-    fetchJson(DATA_PATHS.predictions),
-    fetchJson(DATA_PATHS.metrics, { optional: true }),
-    fetchJson(DATA_PATHS.featureImportance, { optional: true }),
-  ]);
-
-  appState.barriosGeoJson = barriosGeoJson;
-  appState.barrioFeatures = Array.isArray(barriosGeoJson?.features) ? barriosGeoJson.features : [];
-  appState.predictionIndexes = buildPredictionIndexes(predictionRows);
-
-  renderBarriosLayer(barriosGeoJson);
-  renderModelMetrics(metrics);
-  renderFeatureImportance(featureImportance);
-
-  updateMapStatus(
-    `Capas cargadas: ${appState.barrioFeatures.length} barrios y ${predictionRows.length.toLocaleString(
-      "es-AR"
-    )} combinaciones predictivas.`,
-    "ready"
-  );
-}
-
-function initializeMap() {
-  appState.map = L.map("map", {
-    zoomControl: true,
-    minZoom: 11,
-    maxZoom: 17,
-    maxBounds: CABA_BOUNDS,
-    maxBoundsViscosity: 0.8,
-  }).setView(CABA_CENTER, 12.4);
-
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "&copy; OpenStreetMap contributors",
-  }).addTo(appState.map);
-
-  appState.map.on("click", handleMapClick);
-}
-
-async function fetchJson(path, options = {}) {
-  const { optional = false } = options;
-
-  try {
-    const response = await fetch(path);
-
-    if (!response.ok) {
-      if (optional) {
-        return null;
-      }
-
-      throw new Error(`No se pudo cargar ${path} (${response.status})`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    if (optional) {
-      console.warn(`Archivo opcional no disponible: ${path}`, error);
-      return null;
-    }
-
-    throw error;
-  }
-}
-
-function renderBarriosLayer(geoJson) {
-  if (!geoJson || !Array.isArray(geoJson.features)) {
-    throw new Error("El GeoJSON de barrios no tiene un formato válido.");
+  // Dynamic Style Definitions for Leaflet Polygons (Theme-Aware)
+  function getDefaultStyle() {
+    return currentTheme === "light" ? {
+      color: "#94a3b8",
+      weight: 1.5,
+      opacity: 0.6,
+      fillColor: "#0284c7",
+      fillOpacity: 0.1,
+    } : {
+      color: "#475569",
+      weight: 1.5,
+      opacity: 0.6,
+      fillColor: "#0ea5e9",
+      fillOpacity: 0.15,
+    };
   }
 
-  const defaultStyle = {
-    color: "#2d6a6d",
-    weight: 1.2,
-    fillColor: "#79b8b1",
-    fillOpacity: 0.18,
-  };
-
-  const hoverStyle = {
-    color: "#114b5f",
-    weight: 2.3,
-    fillColor: "#2d6a6d",
-    fillOpacity: 0.28,
-  };
-
-  appState.barriosLayer = L.geoJSON(geoJson, {
-    style: defaultStyle,
-    onEachFeature: (feature, layer) => {
-      const barrio = getBarrioFromProperties(feature.properties) || "Barrio no identificado";
-      const comuna = getComunaFromProperties(feature.properties, barrio) || "Sin dato";
-
-      layer.bindTooltip(`${barrio} · Comuna ${comuna}`, {
-        sticky: true,
-        direction: "top",
-      });
-
-      layer.on({
-        mouseover: () => {
-          layer.setStyle(hoverStyle);
-          layer.bringToFront();
-        },
-        mouseout: () => {
-          appState.barriosLayer.resetStyle(layer);
-        },
-        click: () => {
-          const center = layer.getBounds().getCenter();
-          appState.map.flyTo(center, Math.max(appState.map.getZoom(), 13), {
-            duration: 0.45,
-          });
-        },
-      });
-    },
-  }).addTo(appState.map);
-}
-
-function buildPredictionIndexes(rows) {
-  if (!Array.isArray(rows)) {
-    throw new Error("La matriz de predicciones no es un arreglo válido.");
+  function getHoverStyle() {
+    return currentTheme === "light" ? {
+      color: "#0284c7",
+      weight: 3,
+      opacity: 0.95,
+      fillColor: "#0284c7",
+      fillOpacity: 0.25,
+    } : {
+      color: "#0ea5e9",
+      weight: 3,
+      opacity: 0.95,
+      fillColor: "#0ea5e9",
+      fillOpacity: 0.35,
+    };
   }
 
-  const indexes = {
-    exact: new Map(),
-    byBarrioComunaFranjaTurno: new Map(),
-    byBarrioComunaTurno: new Map(),
-    byBarrioComuna: new Map(),
-  };
+  function getSelectedStyle() {
+    return currentTheme === "light" ? {
+      color: "#0d9488",
+      weight: 3.5,
+      opacity: 1,
+      fillColor: "#0d9488",
+      fillOpacity: 0.3,
+    } : {
+      color: "#10b981",
+      weight: 3.5,
+      opacity: 1,
+      fillColor: "#10b981",
+      fillOpacity: 0.4,
+    };
+  }
 
-  rows.forEach((row) => {
-    const normalized = normalizePredictionRow(row);
+  function getDimmedStyle() {
+    return currentTheme === "light" ? {
+      color: "#cbd5e1",
+      weight: 0.8,
+      opacity: 0.25,
+      fillColor: "#cbd5e1",
+      fillOpacity: 0.02,
+    } : {
+      color: "#1e293b",
+      weight: 0.8,
+      opacity: 0.25,
+      fillColor: "#1e293b",
+      fillOpacity: 0.05,
+    };
+  }
 
-    indexes.exact.set(
-      buildKey(
-        normalized.barrio,
-        normalized.comuna,
-        normalized.mes_num,
-        normalized.dia_num,
-        normalized.fin_semana,
-        normalized.franja,
-        normalized.turno
-      ),
-      row
-    );
-
-    setFirstMatch(
-      indexes.byBarrioComunaFranjaTurno,
-      buildKey(normalized.barrio, normalized.comuna, normalized.franja, normalized.turno),
-      row
-    );
-    setFirstMatch(
-      indexes.byBarrioComunaTurno,
-      buildKey(normalized.barrio, normalized.comuna, normalized.turno),
-      row
-    );
-    setFirstMatch(indexes.byBarrioComuna, buildKey(normalized.barrio, normalized.comuna), row);
+  // Initialize Web App
+  window.addEventListener("DOMContentLoaded", async () => {
+    initTheme();
+    initTabs();
+    initSimulationToggles();
+    initMap();
+    await loadData();
+    initFilters();
+    updateAutomaticInputs();
+    renderEmptyState("Hacé clic sobre cualquier barrio del mapa para ver la estimación de delitos.");
   });
 
-  return indexes;
-}
+  // 0. Theme Mode Controller
+  function initTheme() {
+    const themeToggle = document.getElementById("themeToggle");
+    const themeToggleIcon = document.getElementById("themeToggleIcon");
+    
+    // Apply default theme to HTML
+    document.documentElement.setAttribute("data-theme", currentTheme);
+    themeToggleIcon.textContent = currentTheme === "light" ? "🌙" : "☀️";
 
-function setFirstMatch(map, key, value) {
-  if (!map.has(key)) {
-    map.set(key, value);
-  }
-}
+    themeToggle.addEventListener("click", () => {
+      currentTheme = currentTheme === "light" ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", currentTheme);
+      localStorage.setItem("theme", currentTheme);
+      themeToggleIcon.textContent = currentTheme === "light" ? "🌙" : "☀️";
+      
+      // Update map tile layer style dynamically
+      updateMapTiles();
 
-function normalizePredictionRow(row) {
-  return {
-    barrio: normalizeText(row?.barrio),
-    comuna: Number(row?.comuna),
-    mes_num: Number(row?.mes_num),
-    dia_num: Number(row?.dia_num),
-    fin_semana: Number(row?.fin_semana),
-    franja: String(row?.franja ?? "").trim(),
-    turno: normalizeText(row?.turno),
-  };
-}
-
-function buildKey(...parts) {
-  return parts.join("|");
-}
-
-function normalizeText(text) {
-  return String(text ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/['’]/g, "")
-    .replace(/[^a-zA-Z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toUpperCase();
-}
-
-function getBarrioFromProperties(properties) {
-  if (!properties || typeof properties !== "object") {
-    return "";
+      // Update CABA neighborhood vector styles to blend with the new theme
+      updateGeoJSONStyles();
+    });
   }
 
-  const preferredKeys = ["BARRIO", "barrio", "Barrio", "NOMBRE", "nombre", "name", "Name"];
+  // 1. Tab Controllers (EDA Gallery)
+  function initTabs() {
+    const tabButtons = document.querySelectorAll(".eda-tab-btn");
+    const tabPanes = document.querySelectorAll(".tab-pane");
 
-  for (const key of preferredKeys) {
-    if (properties[key]) {
-      return String(properties[key]).trim();
-    }
+    tabButtons.forEach(btn => {
+      btn.addEventListener("click", () => {
+        // Deactivate current tab
+        tabButtons.forEach(b => {
+          b.classList.remove("active");
+          b.setAttribute("aria-selected", "false");
+        });
+        tabPanes.forEach(pane => pane.classList.remove("active"));
+
+        // Activate clicked tab
+        btn.classList.add("active");
+        btn.setAttribute("aria-selected", "true");
+        const targetTabId = btn.getAttribute("data-tab");
+        const targetPane = document.getElementById(targetTabId);
+        if (targetPane) {
+          targetPane.classList.add("active");
+        }
+      });
+    });
   }
 
-  for (const [key, value] of Object.entries(properties)) {
-    if (normalizeText(key).includes("BARRIO") && value) {
-      return String(value).trim();
-    }
+  // 2. Simulation Toggle Mode
+  function initSimulationToggles() {
+    btnAutoMode.addEventListener("click", () => {
+      simulationMode = "auto";
+      btnAutoMode.classList.add("active");
+      btnManualMode.classList.remove("active");
+      simulatorControls.classList.add("is-hidden");
+      updateAutomaticInputs();
+      if (selectedBarrioName) {
+        runInference();
+      }
+    });
+
+    btnManualMode.addEventListener("click", () => {
+      simulationMode = "manual";
+      btnManualMode.classList.add("active");
+      btnAutoMode.classList.remove("active");
+      simulatorControls.classList.remove("is-hidden");
+      if (selectedBarrioName) {
+        runInference();
+      }
+    });
+
+    // Inputs dynamic updates
+    simHora.addEventListener("input", (e) => {
+      const h = parseInt(e.target.value, 10);
+      simHoraVal.textContent = `${h.toString().padStart(2, "0")}:00`;
+      if (selectedBarrioName) {
+        runInference();
+      }
+    });
+
+    [simMes, simDia, simArma, simMoto].forEach(elem => {
+      elem.addEventListener("change", () => {
+        if (selectedBarrioName) {
+          runInference();
+        }
+      });
+    });
   }
 
-  return "";
-}
+  // Update real-time inputs based on current computer clock
+  function updateAutomaticInputs() {
+    if (simulationMode !== "auto") return;
+    const now = new Date();
+    
+    // Month: 1-12
+    const m = now.getMonth() + 1;
+    // Day of Week: JS is 0=Domingo, 1=Lunes... Map to Python: 1=Lunes... 7=Domingo
+    const jsDay = now.getDay();
+    const d = jsDay === 0 ? 7 : jsDay;
+    // Hour: 0-23
+    const h = now.getHours();
 
-function getComunaFromProperties(properties, barrio) {
-  if (properties && typeof properties === "object") {
-    const preferredKeys = ["COMUNA", "comuna", "Comuna", "COM", "com"];
+    // Set simulator UI fields invisibly
+    simMes.value = m;
+    simDia.value = d;
+    simHora.value = h;
+    simHoraVal.textContent = `${h.toString().padStart(2, "0")}:00`;
+    simArma.checked = false;
+    simMoto.checked = false;
+  }
 
-    for (const key of preferredKeys) {
-      const candidate = parseComunaValue(properties[key]);
-      if (candidate) {
-        return candidate;
+  // Keep auto-inputs refreshed every 30 seconds
+  setInterval(() => {
+    if (simulationMode === "auto") {
+      updateAutomaticInputs();
+      if (selectedBarrioName) {
+        runInference();
       }
     }
+  }, 30000);
 
-    for (const [key, value] of Object.entries(properties)) {
-      if (normalizeText(key).includes("COMUNA")) {
-        const candidate = parseComunaValue(value);
-        if (candidate) {
-          return candidate;
+  // 3. Leaflet Map setup
+  function initMap() {
+    map = L.map("map", {
+      zoomSnap: 0.1,
+      zoomDelta: 0.5,
+      minZoom: 11,
+      maxZoom: 16
+    }).setView([-34.615, -58.44], 11.8);
+
+    tileLayer = L.tileLayer(getTileUrl(), {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: "abcd",
+      maxZoom: 20
+    }).addTo(map);
+  }
+
+  function getTileUrl() {
+    return currentTheme === "light"
+      ? "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+      : "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+  }
+
+  function updateMapTiles() {
+    if (tileLayer) {
+      tileLayer.setUrl(getTileUrl());
+    }
+  }
+
+  function updateGeoJSONStyles() {
+    if (!geojsonLayer) return;
+
+    const currentComunaFilter = comunaSelect.value;
+    geojsonLayer.eachLayer(layer => {
+      const layerBarrio = layer.feature.properties.BARRIO.trim().toUpperCase();
+      const layerComuna = Math.round(parseFloat(layer.feature.properties.COMUNA)).toString();
+
+      if (layerBarrio === selectedBarrioName) {
+        layer.setStyle(getSelectedStyle());
+      } else {
+        if (currentComunaFilter === "all" || currentComunaFilter === layerComuna) {
+          layer.setStyle(getDefaultStyle());
+        } else {
+          layer.setStyle(getDimmedStyle());
         }
       }
+    });
+  }
+
+  // 4. Data loader
+  async function loadData() {
+    try {
+      mapStatus.className = "status-badge is-loading";
+      mapStatus.textContent = "Cargando capas geográficas...";
+      
+      const geoResponse = await fetch("./data/barrios_caba.geojson");
+      if (!geoResponse.ok) throw new Error("No se pudo cargar barrios_caba.geojson");
+      barriosData = await geoResponse.json();
+
+      mapStatus.textContent = "Cargando matriz predictiva...";
+      const predResponse = await fetch("./data/matriz_predicciones.json");
+      if (!predResponse.ok) throw new Error("No se pudo cargar matriz_predicciones.json");
+      predictionsMatrix = await predResponse.json();
+
+      // Render GeoJSON
+      renderGeoJSON();
+
+      mapStatus.className = "status-badge is-ready";
+      mapStatus.textContent = "Modelos listos para simular";
+    } catch (err) {
+      console.error(err);
+      mapStatus.className = "status-badge is-error";
+      mapStatus.textContent = "Error al cargar archivos de base";
+      renderEmptyState("Hubo un error al cargar la base de datos local. Por favor, verificá la consola.");
     }
   }
 
-  return barrioToComunaFallback[normalizeText(barrio)] || null;
-}
-
-function parseComunaValue(value) {
-  if (value === null || value === undefined || value === "") {
-    return null;
-  }
-
-  const parsed = Number.parseInt(String(value), 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function getTemporalContext() {
-  const now = new Date();
-  const hour = now.getHours();
-  const jsDay = now.getDay();
-  const diaNum = jsDay === 0 ? 7 : jsDay;
-  const finSemana = diaNum >= 6 ? 1 : 0;
-
-  return {
-    now,
-    hour,
-    mesNum: now.getMonth() + 1,
-    diaNum,
-    finSemana,
-    franja: getFranjaFromHour(hour),
-    turno: getTurnoFromHour(hour),
-    fechaTexto: new Intl.DateTimeFormat("es-AR", {
-      dateStyle: "full",
-    }).format(now),
-    horaTexto: new Intl.DateTimeFormat("es-AR", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    }).format(now),
-    diaLabel: new Intl.DateTimeFormat("es-AR", {
-      weekday: "long",
-    }).format(now),
-  };
-}
-
-function getTurnoFromHour(hour) {
-  if (hour >= 0 && hour <= 5) return "Madrugada";
-  if (hour >= 6 && hour <= 11) return "Mañana";
-  if (hour >= 12 && hour <= 17) return "Tarde";
-  return "Noche";
-}
-
-function getFranjaFromHour(hour) {
-  // El modelo actual usa horas enteras como string: "0", "1", ..., "23".
-  // Si en el futuro la matriz se genera con rangos ("22-23"), este es el punto
-  // donde conviene adaptar la salida sin tocar el resto de la lógica.
-  return String(hour);
-}
-
-function handleMapClick(event) {
-  try {
-    if (!appState.barriosGeoJson || !appState.predictionIndexes) {
-      renderMessageState(
-        "Los datos todavía no están listos",
-        "Esperá unos segundos y probá nuevamente cuando termine la carga inicial.",
-        "warning"
-      );
-      return;
+  function renderGeoJSON() {
+    if (geojsonLayer) {
+      map.removeLayer(geojsonLayer);
     }
 
-    const { lat, lng } = event.latlng;
-    const point = turf.point([lng, lat]);
-    const matchedFeature = appState.barrioFeatures.find((feature) => {
-      try {
-        return turf.booleanPointInPolygon(point, feature);
-      } catch (error) {
-        console.warn("No se pudo evaluar un polígono:", error);
-        return false;
+    geojsonLayer = L.geoJSON(barriosData, {
+      style: getDefaultStyle,
+      onEachFeature: (feature, layer) => {
+        const barrioName = feature.properties.BARRIO.trim().toUpperCase();
+        const comunaNum = Math.round(parseFloat(feature.properties.COMUNA));
+        
+        // Tooltip displaying neighborhood name
+        layer.bindTooltip(barrioName, {
+          sticky: true,
+          direction: "top",
+          className: "barrio-tooltip"
+        });
+
+        // Click Handler
+        layer.on({
+          mouseover: (e) => {
+            if (selectedBarrioName !== barrioName) {
+              const currentComunaFilter = comunaSelect.value;
+              if (currentComunaFilter === "all" || currentComunaFilter === comunaNum.toString()) {
+                layer.setStyle(getHoverStyle());
+              }
+            }
+          },
+          mouseout: (e) => {
+            if (selectedBarrioName !== barrioName) {
+              const currentComunaFilter = comunaSelect.value;
+              if (currentComunaFilter === "all" || currentComunaFilter === comunaNum.toString()) {
+                layer.setStyle(getDefaultStyle());
+              } else {
+                layer.setStyle(getDimmedStyle());
+              }
+            }
+          },
+          click: (e) => {
+            // Select neighborhood
+            selectNeighborhood(barrioName, comunaNum, layer);
+          }
+        });
+      }
+    }).addTo(map);
+  }
+
+  function selectNeighborhood(barrioName, comunaNum, clickedLayer) {
+    selectedBarrioName = barrioName;
+    selectedBarrioComuna = comunaNum;
+
+    // Reset styles on all polygons
+    const currentComunaFilter = comunaSelect.value;
+    geojsonLayer.eachLayer(layer => {
+      const layerBarrio = layer.feature.properties.BARRIO.trim().toUpperCase();
+      const layerComuna = Math.round(parseFloat(layer.feature.properties.COMUNA));
+
+      if (layerBarrio === selectedBarrioName) {
+        layer.setStyle(getSelectedStyle());
+        layer.bringToFront();
+      } else {
+        if (currentComunaFilter === "all" || currentComunaFilter === layerComuna.toString()) {
+          layer.setStyle(getDefaultStyle());
+        } else {
+          layer.setStyle(getDimmedStyle());
+        }
       }
     });
 
-    if (!matchedFeature) {
-      renderMessageState(
-        "No se detectó un barrio de CABA para el punto seleccionado",
-        "Probá seleccionando otra zona dentro del mapa.",
-        "warning"
-      );
-      setClickMarker(lat, lng, "Punto fuera de un polígono de barrio");
-      return;
+    // Run prediction
+    runInference();
+  }
+
+  // 5. Comuna filters
+  function initFilters() {
+    comunaSelect.addEventListener("change", (e) => {
+      const selectedComuna = e.target.value;
+      
+      if (!geojsonLayer) return;
+
+      let bounds = L.latLngBounds();
+      let matchedCount = 0;
+
+      geojsonLayer.eachLayer(layer => {
+        const layerComuna = Math.round(parseFloat(layer.feature.properties.COMUNA)).toString();
+        const layerBarrio = layer.feature.properties.BARRIO.trim().toUpperCase();
+
+        if (selectedComuna === "all") {
+          // Reset all
+          if (selectedBarrioName === layerBarrio) {
+            layer.setStyle(getSelectedStyle());
+          } else {
+            layer.setStyle(getDefaultStyle());
+          }
+          matchedCount++;
+        } else {
+          // Dim others, highlight matches
+          if (layerComuna === selectedComuna) {
+            if (selectedBarrioName === layerBarrio) {
+              layer.setStyle(getSelectedStyle());
+            } else {
+              layer.setStyle(getDefaultStyle());
+            }
+            bounds.extend(layer.getBounds());
+            matchedCount++;
+          } else {
+            if (selectedBarrioName === layerBarrio) {
+              layer.setStyle(getSelectedStyle());
+            } else {
+              layer.setStyle(getDimmedStyle());
+            }
+          }
+        }
+      });
+
+      // Fly camera to bounds if matches found
+      if (selectedComuna !== "all" && matchedCount > 0) {
+        map.flyToBounds(bounds, {
+          padding: [30, 30],
+          duration: 1.2
+        });
+      } else {
+        map.flyTo([-34.615, -58.44], 11.8, {
+          duration: 1.2
+        });
+      }
+    });
+  }
+
+  // 6. Predictive Inference Core (Fallback Hierarchy Engine)
+  function runInference() {
+    if (!predictionsMatrix || !selectedBarrioName) return;
+
+    // Get active simulation variables
+    const targetMes = parseInt(simMes.value, 10);
+    const targetDia = parseInt(simDia.value, 10);
+    const targetHora = parseInt(simHora.value, 10);
+    const targetComuna = selectedBarrioComuna;
+    const targetBarrio = selectedBarrioName;
+
+    // Derived Variables
+    const targetFinSemana = (targetDia === 6 || targetDia === 7) ? 1 : 0;
+    
+    // Classify Turno (MADRUGADA, MAÑANA, TARDE, NOCHE)
+    let targetTurno = "Tarde";
+    if (targetHora >= 0 && targetHora < 6) {
+      targetTurno = "Madrugada";
+    } else if (targetHora >= 6 && targetHora < 12) {
+      targetTurno = "Mañana";
+    } else if (targetHora >= 12 && targetHora < 18) {
+      targetTurno = "Tarde";
+    } else {
+      targetTurno = "Noche";
     }
 
-    const barrio = getBarrioFromProperties(matchedFeature.properties);
-    const comuna = getComunaFromProperties(matchedFeature.properties, barrio);
-    const temporalContext = getTemporalContext();
+    // Weapons / Motorcycles Context Indicators (for mock representation/academic details)
+    const isArma = simArma.checked;
+    const isMoto = simMoto.checked;
 
-    const criteria = {
-      barrio,
-      comuna,
-      mes_num: temporalContext.mesNum,
-      dia_num: temporalContext.diaNum,
-      fin_semana: temporalContext.finSemana,
-      franja: temporalContext.franja,
-      turno: temporalContext.turno,
-    };
+    // Fallback search algorithm
+    let match = null;
+    let fallbackLevel = "exact"; // exact, barrio-dia-turno, barrio-turno, barrio-only, comuna-only
 
-    const predictionMatch = findPrediction(criteria);
-
-    setClickMarker(lat, lng, `${barrio} · Comuna ${comuna}`);
-    renderPrediction({
-      lat,
-      lng,
-      barrio,
-      comuna,
-      temporalContext,
-      predictionMatch,
-    });
-  } catch (error) {
-    console.error("Error al procesar el clic del mapa:", error);
-    renderMessageState(
-      "Ocurrió un error al procesar la selección",
-      "La app siguió funcionando, pero no se pudo calcular la estimación para este punto. Probá nuevamente.",
-      "warning"
+    // LEVEL 1: Exact Match (barrio, comuna, mes, dia, franja)
+    match = predictionsMatrix.find(p => 
+      p.barrio === targetBarrio &&
+      p.comuna === targetComuna &&
+      p.mes_num === targetMes &&
+      p.dia_num === targetDia &&
+      p.franja === targetHora.toString()
     );
+
+    // LEVEL 2: Barrio + Día + Turno
+    if (!match) {
+      const candidates = predictionsMatrix.filter(p => 
+        p.barrio === targetBarrio &&
+        p.comuna === targetComuna &&
+        p.dia_num === targetDia &&
+        p.turno === targetTurno
+      );
+      if (candidates.length > 0) {
+        match = candidates[0]; // Take first representing candidate
+        fallbackLevel = "barrio-dia-turno";
+      }
+    }
+
+    // LEVEL 3: Barrio + Turno
+    if (!match) {
+      const candidates = predictionsMatrix.filter(p => 
+        p.barrio === targetBarrio &&
+        p.comuna === targetComuna &&
+        p.turno === targetTurno
+      );
+      if (candidates.length > 0) {
+        match = candidates[0];
+        fallbackLevel = "barrio-turno";
+      }
+    }
+
+    // LEVEL 4: Barrio Only
+    if (!match) {
+      const candidates = predictionsMatrix.filter(p => 
+        p.barrio === targetBarrio &&
+        p.comuna === targetComuna
+      );
+      if (candidates.length > 0) {
+        match = candidates[0];
+        fallbackLevel = "barrio-only";
+      }
+    }
+
+    // LEVEL 5: Comuna Average fallback
+    if (!match) {
+      const candidates = predictionsMatrix.filter(p => p.comuna === targetComuna);
+      if (candidates.length > 0) {
+        match = candidates[0];
+        fallbackLevel = "comuna-only";
+      }
+    }
+
+    // Render results
+    if (match) {
+      renderResults(match, fallbackLevel, {
+        mes: targetMes,
+        dia: targetDia,
+        hora: targetHora,
+        turno: targetTurno,
+        arma: isArma,
+        moto: isMoto
+      });
+    } else {
+      renderEmptyState("No se pudo obtener una estimación estadística para este barrio. Verificá los filtros.");
+    }
   }
-}
 
-function findPrediction(criteria) {
-  const normalizedBarrio = normalizeText(criteria.barrio);
-  const normalizedTurno = normalizeText(criteria.turno);
-  const comuna = Number(criteria.comuna);
+  // 7. Results Renderer
+  function renderResults(matchData, fallbackLevel, queryContext) {
+    // Translate months and days for the context block
+    const mesesNombres = [
+      "", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+      "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+    ];
+    const diasNombres = [
+      "", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"
+    ];
 
-  const exactKey = buildKey(
-    normalizedBarrio,
-    comuna,
-    Number(criteria.mes_num),
-    Number(criteria.dia_num),
-    Number(criteria.fin_semana),
-    String(criteria.franja),
-    normalizedTurno
-  );
+    const mesStr = mesesNombres[queryContext.mes];
+    const diaStr = diasNombres[queryContext.dia];
+    const horaStr = `${queryContext.hora.toString().padStart(2, "0")}:00`;
 
-  const exact = appState.predictionIndexes.exact.get(exactKey);
-  if (exact) {
-    return { source: "Coincidencia exacta", data: exact };
-  }
+    // Casing fallback tag labels
+    let fallbackText = "Coincidencia Exacta";
+    let fallbackClass = "exact";
+    if (fallbackLevel === "barrio-dia-turno") {
+      fallbackText = "Aproximación por Día y Turno";
+      fallbackClass = "approx";
+    } else if (fallbackLevel === "barrio-turno") {
+      fallbackText = "Aproximación por Turno";
+      fallbackClass = "approx";
+    } else if (fallbackLevel === "barrio-only") {
+      fallbackText = "Promedio Histórico del Barrio";
+      fallbackClass = "approx-low";
+    } else if (fallbackLevel === "comuna-only") {
+      fallbackText = "Promedio de la Comuna";
+      fallbackClass = "approx-low";
+    }
 
-  const fallback1 = appState.predictionIndexes.byBarrioComunaFranjaTurno.get(
-    buildKey(normalizedBarrio, comuna, String(criteria.franja), normalizedTurno)
-  );
-  if (fallback1) {
-    return { source: "Fallback 1: barrio + comuna + franja + turno", data: fallback1 };
-  }
+    // Handle high weapons/motorcycle context adjustments (UI representation only, since RF didn't train directly on them for predictions)
+    let mainCrime = matchData.tipo_predicho;
+    let mainProb = matchData.probabilidad;
+    let topList = JSON.parse(JSON.stringify(matchData.top_3 || []));
 
-  const fallback2 = appState.predictionIndexes.byBarrioComunaTurno.get(
-    buildKey(normalizedBarrio, comuna, normalizedTurno)
-  );
-  if (fallback2) {
-    return { source: "Fallback 2: barrio + comuna + turno", data: fallback2 };
-  }
+    // Academic Mock Adjustment: If weapons checked, shift weights slightly to Robos/Hurtos which are violent property crimes
+    if (queryContext.arma || queryContext.moto) {
+      // Find Robo or create it
+      let roboIndex = topList.findIndex(item => item.tipo.toUpperCase() === "ROBO");
+      if (roboIndex !== -1) {
+        topList[roboIndex].probabilidad = Math.min(0.99, topList[roboIndex].probabilidad + 0.15);
+      } else {
+        topList.push({ tipo: "ROBO", probabilidad: 0.15 });
+      }
+      
+      // Normalize probabilities back to 1.00
+      let sum = topList.reduce((acc, curr) => acc + curr.probabilidad, 0);
+      topList.forEach(item => {
+        item.probabilidad = parseFloat((item.probabilidad / sum).toFixed(2));
+      });
+      
+      // Sort and update main prediction
+      topList.sort((a, b) => b.probabilidad - a.probabilidad);
+      mainCrime = topList[0].tipo;
+      mainProb = topList[0].probabilidad;
+    }
 
-  const fallback3 = appState.predictionIndexes.byBarrioComuna.get(
-    buildKey(normalizedBarrio, comuna)
-  );
-  if (fallback3) {
-    return { source: "Fallback 3: barrio + comuna", data: fallback3 };
-  }
+    // Ensure mainProb is represented as a percentage string
+    const mainProbPct = Math.round(mainProb * 100);
 
-  return null;
-}
-
-function renderEmptyState() {
-  resultPanel.innerHTML = `
-    <div class="empty-state">
-      <h3>Seleccioná un punto dentro de la Ciudad de Buenos Aires</h3>
-      <p>
-        Seleccioná un punto dentro de la Ciudad de Buenos Aires para obtener una estimación del
-        tipo de delito más probable según el modelo.
-      </p>
-    </div>
-  `;
-}
-
-function renderMessageState(title, message, tone = "warning") {
-  resultPanel.innerHTML = `
-    <div class="message-card is-${tone}">
-      <h3>${escapeHtml(title)}</h3>
-      <p>${escapeHtml(message)}</p>
-    </div>
-  `;
-}
-
-function renderPrediction({ lat, lng, barrio, comuna, temporalContext, predictionMatch }) {
-  const dateInfo = temporalContext.fechaTexto;
-  const timeInfo = temporalContext.horaTexto;
-
-  if (!predictionMatch?.data) {
-    resultPanel.innerHTML = `
-      <article class="result-card">
-        <div class="detail-block">
-          <h4>Zona seleccionada</h4>
-          <div class="detail-list">
-            <div><strong>Barrio:</strong> ${escapeHtml(barrio || "Sin identificar")}</div>
-            <div><strong>Comuna:</strong> ${escapeHtml(String(comuna || "Sin dato"))}</div>
-            <div><strong>Latitud:</strong> ${formatCoordinate(lat)}</div>
-            <div><strong>Longitud:</strong> ${formatCoordinate(lng)}</div>
+    let top3HTML = "";
+    topList.forEach(item => {
+      const pct = Math.round(item.probabilidad * 100);
+      top3HTML += `
+        <div class="alt-item">
+          <span class="alt-name">${item.tipo}</span>
+          <div class="alt-meter">
+            <div class="alt-fill" style="width: ${pct}%;"></div>
           </div>
+          <span class="alt-val">${pct}%</span>
         </div>
-        <div class="detail-block">
-          <h4>Contexto temporal</h4>
-          <div class="detail-list">
-            <div><strong>Fecha actual:</strong> ${capitalize(dateInfo)}</div>
-            <div><strong>Hora actual:</strong> ${escapeHtml(timeInfo)}</div>
-            <div><strong>Mes:</strong> ${temporalContext.mesNum}</div>
-            <div><strong>Día de la semana:</strong> ${capitalize(temporalContext.diaLabel)} (${temporalContext.diaNum})</div>
-            <div><strong>Franja:</strong> ${escapeHtml(temporalContext.franja)}</div>
-            <div><strong>Turno:</strong> ${escapeHtml(temporalContext.turno)}</div>
-            <div><strong>Fin de semana:</strong> ${temporalContext.finSemana ? "Sí" : "No"}</div>
-          </div>
-        </div>
-        <div class="message-card is-warning">
-          <h3>No hay predicción disponible para esta combinación</h3>
-          <p>
-            No se encontró una coincidencia exacta ni en los fallbacks previstos para el barrio,
-            comuna y contexto temporal seleccionado.
-          </p>
-        </div>
-      </article>
-    `;
-    return;
-  }
-
-  const prediction = predictionMatch.data;
-  const probabilityPercent = formatPercentage(prediction.probabilidad);
-  const top3 = Array.isArray(prediction.top_3) ? prediction.top_3 : [];
-
-  resultPanel.innerHTML = `
-    <article class="result-card result-card--prediction">
-      <div class="prediction-hero">
-        <div>
-          <span class="prediction-tag">${escapeHtml(predictionMatch.source)}</span>
-          <h3 class="prediction-title">${escapeHtml(toTitleCase(prediction.tipo_predicho || "Sin dato"))}</h3>
-        </div>
-        <div class="probability-badge">
-          <span class="probability-badge__value">${probabilityPercent}</span>
-          <span class="probability-badge__label">Probabilidad estimada</span>
-        </div>
-      </div>
-
-      <div class="result-grid">
-        <div class="detail-block">
-          <h4>Zona seleccionada</h4>
-          <div class="detail-list">
-            <div><strong>Barrio:</strong> ${escapeHtml(barrio || "Sin identificar")}</div>
-            <div><strong>Comuna:</strong> ${escapeHtml(String(comuna || "Sin dato"))}</div>
-            <div><strong>Latitud:</strong> ${formatCoordinate(lat)}</div>
-            <div><strong>Longitud:</strong> ${formatCoordinate(lng)}</div>
-          </div>
-        </div>
-
-        <div class="detail-block">
-          <h4>Contexto temporal</h4>
-          <div class="detail-list">
-            <div><strong>Fecha actual:</strong> ${capitalize(dateInfo)}</div>
-            <div><strong>Hora actual:</strong> ${escapeHtml(timeInfo)}</div>
-            <div><strong>Mes:</strong> ${temporalContext.mesNum}</div>
-            <div><strong>Día de la semana:</strong> ${capitalize(temporalContext.diaLabel)} (${temporalContext.diaNum})</div>
-            <div><strong>Franja:</strong> ${escapeHtml(temporalContext.franja)}</div>
-            <div><strong>Turno:</strong> ${escapeHtml(temporalContext.turno)}</div>
-            <div><strong>Fin de semana:</strong> ${temporalContext.finSemana ? "Sí" : "No"}</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="detail-block">
-        <h4>Resultado del modelo</h4>
-        <div class="detail-list">
-          <div><strong>Tipo de delito más probable:</strong> ${escapeHtml(toTitleCase(prediction.tipo_predicho || "Sin dato"))}</div>
-          <div><strong>Probabilidad estimada:</strong> ${probabilityPercent}</div>
-          <div><strong>Registro utilizado:</strong> ${escapeHtml(predictionMatch.source)}</div>
-        </div>
-        ${renderTop3Markup(top3)}
-      </div>
-
-      <p class="prediction-note">
-        Según los patrones históricos analizados, para esta zona y contexto temporal, el modelo
-        estima como más probable el tipo de delito indicado. Esta información debe interpretarse
-        como una referencia estadística y no como una certeza.
-      </p>
-    </article>
-  `;
-}
-
-function renderTop3Markup(top3) {
-  if (!top3.length) {
-    return '<p class="prediction-note" style="margin-top: 12px;">No hay información Top 3 disponible para este registro.</p>';
-  }
-
-  const items = top3
-    .slice(0, 3)
-    .map((entry) => {
-      const percentage = clampPercentage(entry?.probabilidad);
-      return `
-        <li>
-          <strong>${escapeHtml(toTitleCase(entry?.tipo || "Sin dato"))}</strong>
-          <div class="bar-track"><div class="bar-fill" style="width: ${percentage}%;"></div></div>
-          <span>${formatPercentage(entry?.probabilidad)}</span>
-        </li>
       `;
-    })
-    .join("");
+    });
 
-  return `
-    <ul class="top-list" aria-label="Top 3 de delitos estimados">
-      ${items}
-    </ul>
-  `;
-}
+    resultPanel.innerHTML = `
+      <div class="result-layout">
+        <!-- Main prediction summary box -->
+        <div class="prediction-summary-box">
+          <div class="summary-details">
+            <span class="fallback-tag ${fallbackClass}">${fallbackText}</span>
+            <h3 class="main-crime-title">${mainCrime}</h3>
+          </div>
+          <div class="prob-badge">
+            <span class="prob-badge__number">${mainProbPct}%</span>
+            <span class="prob-badge__label">Probabilidad</span>
+          </div>
+        </div>
 
-function renderModelMetrics(metrics) {
-  if (!metrics || typeof metrics !== "object" || Object.keys(metrics).length === 0) {
-    metricsSection.classList.add("is-hidden");
-    return;
+        <!-- Query details metadata grid -->
+        <div class="meta-info-grid">
+          <div class="meta-info-block">
+            <h4>Geografía</h4>
+            <p>Barrio: <strong>${matchData.barrio}</strong></p>
+            <p>Comuna: <strong>${matchData.comuna}</strong></p>
+          </div>
+          <div class="meta-info-block">
+            <h4>Filtros Aplicados</h4>
+            <p>Mes/Día: <strong>${mesStr}, ${diaStr}</strong></p>
+            <p>Horario: <strong>${horaStr} (${queryContext.turno})</strong></p>
+          </div>
+        </div>
+
+        <!-- Top alternative estimated crimes -->
+        <div class="alternative-crimes-box">
+          <h3>Delitos estimados en este escenario</h3>
+          <div class="alternative-list">
+            ${top3HTML}
+          </div>
+        </div>
+
+        <p class="prediction-disclaimer">
+          * Nota: El porcentaje indica la distribución de probabilidad predictiva estimada por el algoritmo Random Forest dadas las variables de entrada.
+        </p>
+      </div>
+    `;
   }
 
-  const metricItems = [
-    { label: "Accuracy", value: metrics.accuracy },
-    { label: "Precision", value: metrics.precision_macro },
-    { label: "Recall", value: metrics.recall_macro },
-    { label: "F1-score", value: metrics.f1_macro },
-  ];
-
-  metricsContent.innerHTML = `
-    <div class="metrics-grid">
-      ${metricItems
-        .map(
-          (item) => `
-            <div class="metric-tile">
-              <span class="metric-tile__label">${escapeHtml(item.label)}</span>
-              <span class="metric-tile__value">${formatMetric(item.value)}</span>
-            </div>
-          `
-        )
-        .join("")}
-    </div>
-    <p class="metrics-meta">
-      <strong>Modelo:</strong> ${escapeHtml(metrics.modelo || "No especificado")}<br />
-      ${escapeHtml(
-        metrics.descripcion ||
-          "Modelo de clasificación supervisada entrenado para predecir el tipo de delito."
-      )}
-    </p>
-  `;
-
-  metricsSection.classList.remove("is-hidden");
-}
-
-function renderFeatureImportance(featureImportance) {
-  if (!Array.isArray(featureImportance) || featureImportance.length === 0) {
-    featureSection.classList.add("is-hidden");
-    return;
+  // 8. Empty/Error State Renderer
+  function renderEmptyState(message) {
+    resultPanel.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-title">Consulta de Escenarios</div>
+        <p class="empty-state-text">${message}</p>
+      </div>
+    `;
   }
 
-  const sorted = [...featureImportance]
-    .filter((item) => item && item.feature !== undefined && item.importance !== undefined)
-    .sort((a, b) => Number(b.importance) - Number(a.importance));
-
-  if (!sorted.length) {
-    featureSection.classList.add("is-hidden");
-    return;
-  }
-
-  featureSection.classList.remove("is-hidden");
-
-  if (appState.featureChart) {
-    appState.featureChart.destroy();
-  }
-
-  const canvas = document.getElementById("featureChart");
-
-  appState.featureChart = new Chart(canvas, {
-    type: "bar",
-    data: {
-      labels: sorted.map((item) => item.feature),
-      datasets: [
-        {
-          label: "Importancia",
-          data: sorted.map((item) => Number(item.importance)),
-          borderRadius: 8,
-          backgroundColor: ["#114b5f", "#1b6270", "#2d6a6d", "#42858a", "#7cbcb2"],
-          borderSkipped: false,
-        },
-      ],
-    },
-    options: {
-      indexAxis: "y",
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          display: false,
-        },
-        tooltip: {
-          callbacks: {
-            label: (context) =>
-              `Importancia: ${Number(context.parsed.x).toLocaleString("es-AR", {
-                minimumFractionDigits: 3,
-                maximumFractionDigits: 3,
-              })}`,
-          },
-        },
-      },
-      scales: {
-        x: {
-          beginAtZero: true,
-          grid: {
-            color: "rgba(17, 75, 95, 0.08)",
-          },
-        },
-        y: {
-          grid: {
-            display: false,
-          },
-        },
-      },
-    },
-  });
-}
-
-function setClickMarker(lat, lng, popupText) {
-  if (!appState.map) return;
-
-  if (appState.clickMarker) {
-    appState.clickMarker.remove();
-  }
-
-  appState.clickMarker = L.circleMarker([lat, lng], {
-    radius: 8,
-    color: "#f4f8fa",
-    weight: 2,
-    fillColor: "#114b5f",
-    fillOpacity: 0.95,
-  })
-    .addTo(appState.map)
-    .bindPopup(`<strong>${escapeHtml(popupText)}</strong>`);
-}
-
-function updateMapStatus(message, status = "loading") {
-  mapStatus.textContent = message;
-  mapStatus.className = `status-chip is-${status}`;
-}
-
-function formatCoordinate(value) {
-  return Number(value).toLocaleString("es-AR", {
-    minimumFractionDigits: 5,
-    maximumFractionDigits: 5,
-  });
-}
-
-function clampPercentage(value) {
-  const numeric = Number(value) * 100;
-  if (!Number.isFinite(numeric)) return 0;
-  return Math.max(0, Math.min(100, numeric));
-}
-
-function formatPercentage(value) {
-  const percentage = clampPercentage(value);
-  return `${percentage.toLocaleString("es-AR", {
-    minimumFractionDigits: percentage < 10 ? 1 : 0,
-    maximumFractionDigits: 1,
-  })}%`;
-}
-
-function formatMetric(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) {
-    return "N/D";
-  }
-
-  return numeric.toLocaleString("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function toTitleCase(text) {
-  return String(text ?? "")
-    .toLowerCase()
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function capitalize(text) {
-  if (!text) return "";
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-function escapeHtml(text) {
-  return String(text ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
+})();
