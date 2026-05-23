@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portal de Análisis de Seguridad CABA</title>
+    <meta
+      name="description"
+      content="Portal interactivo para el estudio y simulación estadística del delito en la Ciudad Autónoma de Buenos Aires mediante modelos de clasificación y visualizaciones exploratorias."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,500;0,700;1,500&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN"
+      crossorigin="anonymous"
+    />
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <!-- Theme Toggle Floating Button -->
+    <button style="display: none;" id="themeToggle" class="theme-toggle-btn" aria-label="Cambiar tema claro u oscuro">
+      <span id="themeToggleIcon" class="theme-toggle-btn__icon">🌙</span>
+    </button>
+
+    <div class="dashboard-container container-fluid px-2 px-sm-3 px-md-4 py-3">
+      <header class="app-header row g-4 py-4 px-3 px-sm-4 mx-0 mb-4 align-items-center">
+        <div class="header-main col-lg-8 col-12">
+          <div class="brand-badge">Ingeniería de Software - Lic. Ciencia de Datos - UGR</div>
+          <h1 class="app-title">Portal de Análisis de Seguridad CABA</h1>
+          <p class="app-subtitle">
+            Plataforma interactiva para la exploración de patrones criminales y simulación estadística del modelo de CABA
+            <!-- <strong>Random Forest Classifier</strong> (Fase #6 - Despliegue, UGR). -->
+          </p>
+        </div>
+        <div class="header-info col-lg-4 col-12 mt-3 mt-lg-0">
+          <span class="info-pill">GRUPO 2</span>
+          <p class="info-text">
+            <!-- Este visualizador interroga una matriz de predicciones precalculada en Python a partir del modelo entrenado. Representa estimaciones de probabilidad estadística histórica y no predicciones en tiempo real de eventos individuales. -->
+            <i class="bi bi-people-fill"></i> Integrantes:
+            <div align="justify">
+              <p>Gisela Martínez - Noelia Cualina - Javier Carabajal - Leonardo Carabajal - Nicolás Suárez - Marcelo Delgado - Ezequias Bonvissuto - Pedro Roberti</p>
+              <p  style="font-size: 12px; color: #6c757d;">Ingeniería de Software - Lic. en Ciencia de Datos - UGR</p>
+            </div>
+          </p>
+        </div>
+      </header>
+
+      <main class="dashboard-grid container-fluid px-0">
+        <!-- Main Interactive Workspace -->
+        <section class="workspace-section row g-4 mb-4">
+          <!-- Left Column: Leaflet Map -->
+          <div class="col-xl-8 col-lg-7 col-12">
+            <article class="dashboard-card map-card h-100">
+              <div class="card-header">
+                <div class="header-text">
+                  <span class="card-tag">Georreferenciación</span>
+                  <h2>Mapa Analítico de Delitos por Barrio</h2>
+                </div>
+                <div class="comuna-filter-wrapper">
+                  <label for="comunaSelect" class="filter-label">Enfocar Comuna:</label>
+                  <select id="comunaSelect" class="filter-select">
+                    <option value="all">Ver Todas</option>
+                    <option value="1">Comuna 1 (Retiro, San Nicolás, etc.)</option>
+                    <option value="2">Comuna 2 (Recoleta)</option>
+                    <option value="3">Comuna 3 (Balvanera, San Cristóbal)</option>
+                    <option value="4">Comuna 4 (La Boca, Barracas, etc.)</option>
+                    <option value="5">Comuna 5 (Almagro, Boedo)</option>
+                    <option value="6">Comuna 6 (Caballito)</option>
+                    <option value="7">Comuna 7 (Flores, Parque Chacabuco)</option>
+                    <option value="8">Comuna 8 (Soldati, Lugano, etc.)</option>
+                    <option value="9">Comuna 9 (Liniers, Mataderos, etc.)</option>
+                    <option value="10">Comuna 10 (Floresta, Versalles, etc.)</option>
+                    <option value="11">Comuna 11 (Villa Devoto, del Parque, etc.)</option>
+                    <option value="12">Comuna 12 (Villa Urquiza, Saavedra, etc.)</option>
+                    <option value="13">Comuna 13 (Belgrano, Núñez, Colegiales)</option>
+                    <option value="14">Comuna 14 (Palermo)</option>
+                    <option value="15">Comuna 15 (Chacarita, Villa Crespo, etc.)</option>
+                  </select>
+                </div>
+              </div>
+              <div id="map" class="map-element" aria-label="Mapa interactivo de CABA"></div>
+              <div class="card-footer">
+                <span id="mapStatus" class="status-badge is-loading">Inicializando base de datos...</span>
+                <span class="footer-source">Límites: Buenos Aires Data · Mapa: OpenStreetMap</span>
+              </div>
+            </article>
+          </div>
+
+          <!-- Right Column: Controls and Live Inference -->
+          <div class="col-xl-4 col-lg-5 col-12">
+            <aside class="control-sidebar d-flex flex-column gap-4 h-100">
+              <!-- Parameter Simulator Card -->
+              <article class="dashboard-card simulator-card">
+                <div class="card-header">
+                  <div class="header-text">
+                    <span class="card-tag">Configuración de Escenarios</span>
+                    <h2>Simulador Paramétrico</h2>
+                  </div>
+                </div>
+                
+                <div class="mode-toggles">
+                  <button id="btnAutoMode" class="mode-btn active" title="Usa la fecha y hora de tu sistema">
+                    <i class="bi bi-clock-fill"></i> Tiempo Real (Auto)
+                  </button>
+                  <button id="btnManualMode" class="mode-btn" title="Simula escenarios combinando variables manualmente">
+                    <i class="bi bi-columns-gap"></i> Simular Escenario
+                  </button>
+                </div>
+
+                <div id="simulatorControls" class="simulator-fields is-hidden">
+                  <div class="input-row">
+                    <div class="input-group">
+                      <label for="simMes" class="input-label">Mes:</label>
+                      <select id="simMes" class="sim-select">
+                        <option value="1">Enero</option>
+                        <option value="2">Febrero</option>
+                        <option value="3">Marzo</option>
+                        <option value="4">Abril</option>
+                        <option value="5">Mayo</option>
+                        <option value="6">Junio</option>
+                        <option value="7">Julio</option>
+                        <option value="8">Agosto</option>
+                        <option value="9">Septiembre</option>
+                        <option value="10">Octubre</option>
+                        <option value="11">Noviembre</option>
+                        <option value="12">Diciembre</option>
+                      </select>
+                    </div>
+                    <div class="input-group">
+                      <label for="simDia" class="input-label">Día de la Semana:</label>
+                      <select id="simDia" class="sim-select">
+                        <option value="1">Lunes</option>
+                        <option value="2">Martes</option>
+                        <option value="3">Miércoles</option>
+                        <option value="4">Jueves</option>
+                        <option value="5">Viernes</option>
+                        <option value="6">Sábado</option>
+                        <option value="7">Domingo</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="input-group slider-group">
+                    <div class="slider-header">
+                      <label for="simHora" class="input-label">Hora del día:</label>
+                      <span id="simHoraVal" class="slider-value">12:00</span>
+                    </div>
+                    <input type="range" id="simHora" min="0" max="23" value="12" class="sim-slider" />
+                  </div>
+
+                  <div class="checkbox-row">
+                    <label class="custom-checkbox">
+                      <input type="checkbox" id="simArma" />
+                      <span class="checkmark"></span>
+                      <span class="checkbox-text"><i class="bi bi-exclamation-triangle-fill text-danger"></i> Uso de Arma</span>
+                    </label>
+                    <label class="custom-checkbox">
+                      <input type="checkbox" id="simMoto" />
+                      <span class="checkmark"></span>
+                      <span class="checkbox-text">🏍️ Uso de Moto</span>
+                    </label>
+                  </div>
+                </div>
+              </article>
+
+              <!-- Results Card -->
+              <article class="dashboard-card results-card">
+                <div class="card-header">
+                  <div class="header-text">
+                    <span class="card-tag">Inferencia Estadística</span>
+                    <h2>Predicción del Modelo</h2>
+                  </div>
+                </div>
+                <div id="resultPanel" class="results-container"></div>
+              </article>
+            </aside>
+          </div>
+        </section>
+
+        <!-- Model Summary & Variable Importance Section -->
+        <section class="diagnostics-section row g-4 mb-4">
+          <!-- Variable Importance with Native Progress Bars -->
+          <div class="col-md-6 col-12">
+            <article class="dashboard-card diagnostics-card h-100">
+              <div class="card-header">
+                <div class="header-text">
+                  <span class="card-tag">Interpretabilidad</span>
+                  <h2>Importancia de Variables (Feature Importance)</h2>
+                </div>
+              </div>
+              <p class="diagnostics-intro">
+                Muestra la contribución relativa de cada variable del dataset en la toma de decisiones del algoritmo <strong>Random Forest Classifier</strong>, calculado según la reducción media de impureza de Gini.
+              </p>
+              <div class="importance-list">
+                <div class="importance-item">
+                  <div class="importance-meta">
+                    <span class="var-name">mes_num (Mes)</span>
+                    <span class="var-val">27.95%</span>
+                  </div>
+                  <div class="progress-bar-track">
+                    <div class="progress-bar-fill" style="width: 27.95%;"></div>
+                  </div>
+                </div>
+                <div class="importance-item">
+                  <div class="importance-meta">
+                    <span class="var-name">franja (Hora del día)</span>
+                    <span class="var-val">21.61%</span>
+                  </div>
+                  <div class="progress-bar-track">
+                    <div class="progress-bar-fill" style="width: 21.61%;"></div>
+                  </div>
+                </div>
+                <div class="importance-item">
+                  <div class="importance-meta">
+                    <span class="var-name">barrio (Vecindario)</span>
+                    <span class="var-val">18.82%</span>
+                  </div>
+                  <div class="progress-bar-track">
+                    <div class="progress-bar-fill" style="width: 18.82%;"></div>
+                  </div>
+                </div>
+                <div class="importance-item">
+                  <div class="importance-meta">
+                    <span class="var-name">comuna (Comuna geográfica)</span>
+                    <span class="var-val">11.94%</span>
+                  </div>
+                  <div class="progress-bar-track">
+                    <div class="progress-bar-fill" style="width: 11.94%;"></div>
+                  </div>
+                </div>
+                <div class="importance-item">
+                  <div class="importance-meta">
+                    <span class="var-name">dia_num (Día de la semana)</span>
+                    <span class="var-val">11.90%</span>
+                  </div>
+                  <div class="progress-bar-track">
+                    <div class="progress-bar-fill" style="width: 11.90%;"></div>
+                  </div>
+                </div>
+                <div class="importance-item">
+                  <div class="importance-meta">
+                    <span class="var-name">turno (Madrugada/Mañana/Tarde/Noche)</span>
+                    <span class="var-val">2.45%</span>
+                  </div>
+                  <div class="progress-bar-track">
+                    <div class="progress-bar-fill" style="width: 2.45%;"></div>
+                  </div>
+                </div>
+                <div class="importance-item">
+                  <div class="importance-meta">
+                    <span class="var-name">uso_moto_bin (Motos)</span>
+                    <span class="var-val">2.23%</span>
+                  </div>
+                  <div class="progress-bar-track">
+                    <div class="progress-bar-fill" style="width: 2.23%;"></div>
+                  </div>
+                </div>
+                <div class="importance-item">
+                  <div class="importance-meta">
+                    <span class="var-name">uso_arma_bin (Armas)</span>
+                    <span class="var-val">2.21%</span>
+                  </div>
+                  <div class="progress-bar-track">
+                    <div class="progress-bar-fill" style="width: 2.21%;"></div>
+                  </div>
+                </div>
+                <div class="importance-item">
+                  <div class="importance-meta">
+                    <span class="var-name">fin_semana (Sábado/Domingo)</span>
+                    <span class="var-val">0.91%</span>
+                  </div>
+                  <div class="progress-bar-track">
+                    <div class="progress-bar-fill" style="width: 0.91%;"></div>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <!-- Model Evaluation Panel -->
+          <div class="col-md-6 col-12">
+            <article class="dashboard-card diagnostics-card h-100">
+              <div class="card-header">
+                <div class="header-text">
+                  <span class="card-tag">Fase #5: Evaluación</span>
+                  <h2>Métricas Clave de Calidad</h2>
+                </div>
+              </div>
+              <div class="metrics-grid">
+                <div class="metric-block">
+                  <span class="metric-label">Accuracy Global</span>
+                  <span class="metric-value">37.68%</span>
+                  <span class="metric-desc">Tasa total de aciertos sobre el set de prueba.</span>
+                </div>
+                <div class="metric-block">
+                  <span class="metric-label">Precisión (Macro)</span>
+                  <span class="metric-value">23.00%</span>
+                  <span class="metric-desc">Promedio de exactitud por clase.</span>
+                </div>
+                <div class="metric-block">
+                  <span class="metric-label">Recall (Macro)</span>
+                  <span class="metric-value">23.00%</span>
+                  <span class="metric-desc">Capacidad promedio de identificar clases.</span>
+                </div>
+                <div class="metric-block">
+                  <span class="metric-label">F1-Score (Macro)</span>
+                  <span class="metric-value">23.00%</span>
+                  <span class="metric-desc">Equilibrio precisión/sensibilidad promedio.</span>
+                </div>
+              </div>
+              <div class="diagnostics-summary">
+                <p><strong>Diagnóstico de desbalance (Fase 5):</strong></p>
+                <p>
+                  El análisis revela una fuerte polarización del modelo inducida por la asimetría del soporte de clases en el dataset (más de 10.000 ejemplos de ROBO y HURTO frente a únicamente 16 casos reales de HOMICIDIOS en la validación). Esto sesga las clasificaciones del Random Forest hacia delitos contra la propiedad e imposibilita la predicción efectiva de ilícitos de baja frecuencia pero alta gravedad (Homicidios dolosos), obteniendo métricas macro del 23.0%.
+                </p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- Jupyter Notebook EDA Plot Gallery Section -->
+        <section class="gallery-section row g-0 mb-4">
+          <div class="col-12">
+            <article class="dashboard-card gallery-card">
+              <div class="card-header">
+                <div class="header-text">
+                  <span class="card-tag">Fase #2: Data Understanding</span>
+                  <h2>Exploración de Datos del Colab (EDA)</h2>
+                </div>
+                <p class="card-caption-desc">
+                  Visualización de los 11 gráficos históricos generados y analizados en Python durante el proyecto grupal.
+                </p>
+              </div>
+
+              <!-- Custom EDA Pestañas (Tabs) -->
+              <div class="eda-tabs-container">
+                <div class="eda-tabs-header" role="tablist">
+                  <button class="eda-tab-btn active" data-tab="tab-temporal" role="tab" aria-selected="true">
+                    📅 Patrones Temporales
+                  </button>
+                  <button class="eda-tab-btn" data-tab="tab-geografico" role="tab" aria-selected="false">
+                    📍 Distribución Espacial
+                  </button>
+                  <button class="eda-tab-btn" data-tab="tab-modalidad" role="tab" aria-selected="false">
+                    ⚠️ Tipologías y Armas
+                  </button>
+                  <button class="eda-tab-btn" data-tab="tab-diagnostico" role="tab" aria-selected="false">
+                    📊 Diagnóstico del Modelo
+                  </button>
+                </div>
+
+                <div class="eda-tabs-body">
+                  <!-- Tab 1: Patrones Temporales -->
+                  <div id="tab-temporal" class="tab-pane active" role="tabpanel">
+                    <div class="plots-grid row g-4 mt-1">
+                      <div class="col-xl-4 col-md-6 col-12">
+                        <div class="plot-item h-100">
+                          <div class="plot-img-box">
+                            <img src="./assets/plots/delitos_por_mes.png" alt="Delitos por Mes" />
+                          </div>
+                          <h4 class="plot-title">Distribución Mensual Acumulada</h4>
+                          <p class="plot-explanation">
+                            Ilustra variaciones estacionales menores en CABA. Los picos se ubican a fines de verano y mediados de otoño, mientras que los meses de clima frío presentan declives discretos en la actividad delictiva total.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div class="col-xl-4 col-md-6 col-12">
+                        <div class="plot-item h-100">
+                          <div class="plot-img-box">
+                            <img src="./assets/plots/delitos_por_dia.png" alt="Delitos por Día de la Semana" />
+                          </div>
+                          <h4 class="plot-title">Análisis de Día de la Semana</h4>
+                          <p class="plot-explanation">
+                            Desmitifica el preconcepto del incremento delictivo los fines de semana. Los días de semana laborables (Lunes a Viernes) presentan mayor concentración absoluta debido a la afluencia laboral, comercial y de cercanía.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div class="col-xl-4 col-md-6 col-12">
+                        <div class="plot-item h-100">
+                          <div class="plot-img-box">
+                            <img src="./assets/plots/delitos_por_franja.png" alt="Delitos por Franja Horaria" />
+                          </div>
+                          <h4 class="plot-title">Análisis Horario y Picos Críticos</h4>
+                          <p class="plot-explanation">
+                            Muestra de forma elocuente el pico drástico en la franja de la tarde-noche (18:00 a 22:00 hs), coincidiendo con el retorno laboral a los hogares, frente a la inactividad relativa de las madrugadas.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Tab 2: Distribución Espacial -->
+                  <div id="tab-geografico" class="tab-pane" role="tabpanel">
+                    <div class="plots-grid grid-2col row g-4 mt-1">
+                      <div class="col-md-6 col-12">
+                        <div class="plot-item h-100">
+                          <div class="plot-img-box">
+                            <img src="./assets/plots/top_barrios.png" alt="Top 10 Barrios con Mayor Delito" />
+                          </div>
+                          <h4 class="plot-title">Top 10 Barrios con Mayor Incidencia Histórica</h4>
+                          <p class="plot-explanation">
+                            El análisis revela que Palermo, Balvanera y Flores registran la mayor cantidad de delitos acumulados. Esto es consecuencia directa de ser polos comerciales masivos, nudos troncales de transporte interurbano (Constitución, Once, Retiro) y focos de densidad demográfica transitoria.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div class="col-md-6 col-12">
+                        <div class="plot-item h-100">
+                          <div class="plot-img-box">
+                            <img src="./assets/plots/delitos_por_comuna.png" alt="Delitos por Comuna" />
+                          </div>
+                          <h4 class="plot-title">Densidad Delictiva por Comuna de CABA</h4>
+                          <p class="plot-explanation">
+                            La Comuna 1 (Microcentro, Retiro, San Telmo, Constitución) destaca de forma muy marcada, seguida por la Comuna 14 (Palermo), demostrando que la actividad delictiva se correlaciona con la concentración económica de la Ciudad Autónoma.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Tab 3: Tipologías y Armas -->
+                  <div id="tab-modalidad" class="tab-pane" role="tabpanel">
+                    <div class="plots-grid row g-4 mt-1">
+                      <div class="col-xl-4 col-md-6 col-12">
+                        <div class="plot-item h-100">
+                          <div class="plot-img-box">
+                            <img src="./assets/plots/uso_arma.png" alt="Uso de Armas" />
+                          </div>
+                          <h4 class="plot-title">Proporción de Uso de Armas</h4>
+                          <p class="plot-explanation">
+                            Mide la incidencia relativa de uso coercitivo de armas de fuego y armas blancas en la perpetración de delitos, reflejando niveles de violencia física o amenazas presentes en los partes oficiales.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div class="col-xl-4 col-md-6 col-12">
+                        <div class="plot-item h-100">
+                          <div class="plot-img-box">
+                            <img src="./assets/plots/uso_moto.png" alt="Uso de Motos" />
+                          </div>
+                          <h4 class="plot-title">Modalidad de 'Motochorros'</h4>
+                          <p class="plot-explanation">
+                            Visualiza los asaltos perpetrados en motovehículos. Esta variable exhibe patrones geográficos y horarios sumamente localizados, esenciales para estrategias de patrullaje preventivo certero en zonas calientes.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div class="col-xl-4 col-md-6 col-12">
+                        <div class="plot-item h-100">
+                          <div class="plot-img-box">
+                            <img src="./assets/plots/analisis_delitos_tipo.png" alt="Delitos por Tipo" />
+                          </div>
+                          <h4 class="plot-title">Volumen Total por Tipo de Delito</h4>
+                          <p class="plot-explanation">
+                            Demuestra que los delitos contra la propiedad (Robos y Hurtos) saturan el dataset agrupando más del 75% del total de eventos, determinando las prioridades analíticas del equipo.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Tab 4: Diagnóstico del Modelo -->
+                  <div id="tab-diagnostico" class="tab-pane" role="tabpanel">
+                    <div class="plots-grid grid-2col row g-4 mt-1">
+                      <div class="col-md-6 col-12">
+                        <div class="plot-item h-100">
+                          <div class="plot-img-box">
+                            <img src="./assets/plots/matriz_confusion.png" alt="Matriz de Confusión Absoluta" />
+                          </div>
+                          <h4 class="plot-title">Matriz de Confusión Absoluta (Random Forest)</h4>
+                          <p class="plot-explanation">
+                            Muestra la matriz cruda sobre el conjunto de test. Evidencia de forma clara cómo las categorías dominantes (Robo y Hurto) acumulan el grueso de aciertos y también de clasificaciones erróneas, empujando al clasificador.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div class="col-md-6 col-12">
+                        <div class="plot-item h-100">
+                          <div class="plot-img-box">
+                            <img src="./assets/plots/matriz_confusion_normalizada.png" alt="Matriz de Confusión Normalizada" />
+                          </div>
+                          <h4 class="plot-title">Matriz de Confusión Normalizada (Recall por clase)</h4>
+                          <p class="plot-explanation">
+                            **Ilustración del sesgo severo:** Al normalizar por fila, se comprueba que Homicidios posee una sensibilidad nula (0.00%). A pesar del entrenamiento de Random Forest, el modelo tiende a clasificar Homicidios (16 registros) como Robos, ya que la optimización penaliza las desviaciones globales, invisibilizando la clase minoritaria de mayor riesgo.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <footer class="app-footer-bar">
+        <p>© 2026 · Universidad del Gran Rosario (UGR) · Licenciatura en Ciencia de Datos</p>
+        <p>Cátedra: Ingeniería de Software · Grupo 2 TP</p>
+      </footer>
+    </div>
+
+    <!-- External Leaflet and Turf scripts -->
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.2.0/turf.min.js"></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"
+      integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL"
+      crossorigin="anonymous"
+    ></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
