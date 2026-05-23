@@ -8,19 +8,19 @@
   let geojsonLayer = null;
   let barriosData = null;
   let predictionsMatrix = null;
-  
+
   let selectedBarrioName = null; // Casing: uppercase, e.g., "PALERMO"
   let selectedBarrioComuna = null; // integer
   let simulationMode = "auto"; // "auto" or "manual"
   let currentTheme = localStorage.getItem("theme") || "light"; // Default theme is Light Mode
-  
+
   // DOM References
   const mapStatus = document.getElementById("mapStatus");
   const resultPanel = document.getElementById("resultPanel");
   const btnAutoMode = document.getElementById("btnAutoMode");
   const btnManualMode = document.getElementById("btnManualMode");
   const simulatorControls = document.getElementById("simulatorControls");
-  
+
   // Simulation Input DOM References
   const simMes = document.getElementById("simMes");
   const simDia = document.getElementById("simDia");
@@ -28,7 +28,7 @@
   const simHoraVal = document.getElementById("simHoraVal");
   const simArma = document.getElementById("simArma");
   const simMoto = document.getElementById("simMoto");
-  
+
   const comunaSelect = document.getElementById("comunaSelect");
 
   // Dynamic Style Definitions for Leaflet Polygons (Theme-Aware)
@@ -100,6 +100,7 @@
   window.addEventListener("DOMContentLoaded", async () => {
     initTheme();
     initTabs();
+    initLightbox();
     initSimulationToggles();
     initMap();
     await loadData();
@@ -112,7 +113,7 @@
   function initTheme() {
     const themeToggle = document.getElementById("themeToggle");
     const themeToggleIcon = document.getElementById("themeToggleIcon");
-    
+
     // Apply default theme to HTML
     document.documentElement.setAttribute("data-theme", currentTheme);
     themeToggleIcon.textContent = currentTheme === "light" ? "🌙" : "☀️";
@@ -122,7 +123,7 @@
       document.documentElement.setAttribute("data-theme", currentTheme);
       localStorage.setItem("theme", currentTheme);
       themeToggleIcon.textContent = currentTheme === "light" ? "🌙" : "☀️";
-      
+
       // Update map tile layer style dynamically
       updateMapTiles();
 
@@ -154,6 +155,68 @@
           targetPane.classList.add("active");
         }
       });
+    });
+  }
+
+  // 1b. Lightbox Zoom Controller (EDA Gallery) - Only active on Desktop
+  function initLightbox() {
+    const lightbox = document.getElementById("edaLightbox");
+    const lightboxImg = document.getElementById("edaLightboxImg");
+    const lightboxTitle = document.getElementById("edaLightboxTitle");
+    const lightboxDesc = document.getElementById("edaLightboxDesc");
+    const closeBtn = lightbox.querySelector(".eda-lightbox__close");
+
+    // Select all plot items
+    const plotItems = document.querySelectorAll(".plot-item");
+
+    plotItems.forEach(item => {
+      // Find the image wrapper / box
+      const imgBox = item.querySelector(".plot-img-box");
+      if (!imgBox) return;
+
+      imgBox.addEventListener("click", () => {
+        // Trigger only on desktop viewports (width >= 992px)
+        if (window.innerWidth < 992) return;
+
+        // Extract data
+        const img = item.querySelector("img");
+        const title = item.querySelector(".plot-title");
+        const desc = item.querySelector(".plot-explanation");
+
+        if (img) {
+          lightboxImg.src = img.src;
+          lightboxImg.alt = img.alt || "Gráfico ampliado";
+        }
+        if (title) lightboxTitle.textContent = title.textContent;
+        if (desc) lightboxDesc.textContent = desc.textContent;
+
+        // Show Lightbox
+        lightbox.classList.add("is-active");
+        lightbox.setAttribute("aria-hidden", "false");
+        document.body.style.overflow = "hidden"; // Disable scroll when open
+      });
+    });
+
+    const closeLightbox = () => {
+      lightbox.classList.remove("is-active");
+      lightbox.setAttribute("aria-hidden", "true");
+      document.body.style.overflow = ""; // Re-enable scroll
+    };
+
+    closeBtn.addEventListener("click", closeLightbox);
+
+    // Close on click outside the content box
+    lightbox.addEventListener("click", (e) => {
+      if (e.target === lightbox) {
+        closeLightbox();
+      }
+    });
+
+    // Close on ESC key press
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && lightbox.classList.contains("is-active")) {
+        closeLightbox();
+      }
     });
   }
 
@@ -202,7 +265,7 @@
   function updateAutomaticInputs() {
     if (simulationMode !== "auto") return;
     const now = new Date();
-    
+
     // Month: 1-12
     const m = now.getMonth() + 1;
     // Day of Week: JS is 0=Domingo, 1=Lunes... Map to Python: 1=Lunes... 7=Domingo
@@ -283,7 +346,7 @@
     try {
       mapStatus.className = "status-badge is-loading";
       mapStatus.textContent = "Cargando capas geográficas...";
-      
+
       const geoResponse = await fetch("./data/barrios_caba.geojson");
       if (!geoResponse.ok) throw new Error("No se pudo cargar barrios_caba.geojson");
       barriosData = await geoResponse.json();
@@ -316,11 +379,11 @@
       onEachFeature: (feature, layer) => {
         const barrioName = feature.properties.BARRIO.trim().toUpperCase();
         const comunaNum = Math.round(parseFloat(feature.properties.COMUNA));
-        
-        // Tooltip displaying neighborhood name
+
+        // Permanent centered neighborhood text label
         layer.bindTooltip(barrioName, {
-          sticky: true,
-          direction: "top",
+          permanent: true,
+          direction: "center",
           className: "barrio-tooltip"
         });
 
@@ -383,7 +446,7 @@
   function initFilters() {
     comunaSelect.addEventListener("change", (e) => {
       const selectedComuna = e.target.value;
-      
+
       if (!geojsonLayer) return;
 
       let bounds = L.latLngBounds();
@@ -448,7 +511,7 @@
 
     // Derived Variables
     const targetFinSemana = (targetDia === 6 || targetDia === 7) ? 1 : 0;
-    
+
     // Classify Turno (MADRUGADA, MAÑANA, TARDE, NOCHE)
     let targetTurno = "Tarde";
     if (targetHora >= 0 && targetHora < 6) {
@@ -470,7 +533,7 @@
     let fallbackLevel = "exact"; // exact, barrio-dia-turno, barrio-turno, barrio-only, comuna-only
 
     // LEVEL 1: Exact Match (barrio, comuna, mes, dia, franja)
-    match = predictionsMatrix.find(p => 
+    match = predictionsMatrix.find(p =>
       p.barrio === targetBarrio &&
       p.comuna === targetComuna &&
       p.mes_num === targetMes &&
@@ -480,7 +543,7 @@
 
     // LEVEL 2: Barrio + Día + Turno
     if (!match) {
-      const candidates = predictionsMatrix.filter(p => 
+      const candidates = predictionsMatrix.filter(p =>
         p.barrio === targetBarrio &&
         p.comuna === targetComuna &&
         p.dia_num === targetDia &&
@@ -494,7 +557,7 @@
 
     // LEVEL 3: Barrio + Turno
     if (!match) {
-      const candidates = predictionsMatrix.filter(p => 
+      const candidates = predictionsMatrix.filter(p =>
         p.barrio === targetBarrio &&
         p.comuna === targetComuna &&
         p.turno === targetTurno
@@ -507,7 +570,7 @@
 
     // LEVEL 4: Barrio Only
     if (!match) {
-      const candidates = predictionsMatrix.filter(p => 
+      const candidates = predictionsMatrix.filter(p =>
         p.barrio === targetBarrio &&
         p.comuna === targetComuna
       );
@@ -587,13 +650,13 @@
       } else {
         topList.push({ tipo: "ROBO", probabilidad: 0.15 });
       }
-      
+
       // Normalize probabilities back to 1.00
       let sum = topList.reduce((acc, curr) => acc + curr.probabilidad, 0);
       topList.forEach(item => {
         item.probabilidad = parseFloat((item.probabilidad / sum).toFixed(2));
       });
-      
+
       // Sort and update main prediction
       topList.sort((a, b) => b.probabilidad - a.probabilidad);
       mainCrime = topList[0].tipo;
@@ -602,6 +665,18 @@
 
     // Ensure mainProb is represented as a percentage string
     const mainProbPct = Math.round(mainProb * 100);
+
+    // Determine dynamic progressive risk level class
+    let badgeClass = "level-low";
+    if (mainProbPct > 90) {
+      badgeClass = "level-critical";
+    } else if (mainProbPct > 75) {
+      badgeClass = "level-high";
+    } else if (mainProbPct > 55) {
+      badgeClass = "level-alert";
+    } else if (mainProbPct > 35) {
+      badgeClass = "level-moderate";
+    }
 
     let top3HTML = "";
     topList.forEach(item => {
@@ -625,7 +700,7 @@
             <span class="fallback-tag ${fallbackClass}">${fallbackText}</span>
             <h3 class="main-crime-title">${mainCrime}</h3>
           </div>
-          <div class="prob-badge">
+          <div class="prob-badge ${badgeClass}">
             <span class="prob-badge__number">${mainProbPct}%</span>
             <span class="prob-badge__label">Probabilidad</span>
           </div>
@@ -658,6 +733,13 @@
         </p>
       </div>
     `;
+    
+    // Invalidate Leaflet map size to adapt coordinate layers to the new stretched flexbox height
+    if (map) {
+      setTimeout(() => {
+        map.invalidateSize({ animate: true });
+      }, 150);
+    }
   }
 
   // 8. Empty/Error State Renderer
@@ -668,6 +750,13 @@
         <p class="empty-state-text">${message}</p>
       </div>
     `;
+    
+    // Invalidate Leaflet map size when collapsing container height back to empty state
+    if (map) {
+      setTimeout(() => {
+        map.invalidateSize({ animate: true });
+      }, 150);
+    }
   }
 
 })();
